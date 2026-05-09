@@ -27,8 +27,29 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { DNSRecord, DomainInfo } from './types';
+import { auth, db, handleFirestoreError, OperationType } from './lib/firebase';
+import { 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword, 
+  onAuthStateChanged, 
+  signOut,
+  updateProfile 
+} from 'firebase/auth';
+import { 
+  collection, 
+  doc, 
+  setDoc, 
+  getDocs, 
+  query, 
+  where, 
+  addDoc, 
+  deleteDoc, 
+  onSnapshot, 
+  orderBy,
+  serverTimestamp 
+} from 'firebase/firestore';
 
-const AuthView = ({ onLogin }: { onLogin: (user: any) => void }) => {
+const AuthView = () => {
   const [isLogin, setIsLogin] = useState(true);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -43,21 +64,17 @@ const AuthView = ({ onLogin }: { onLogin: (user: any) => void }) => {
     setLoading(true);
 
     try {
-      const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register';
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, email, password })
-      });
-      const data = await res.json();
-
-      if (!res.ok) throw new Error(data.error || 'Something went wrong');
-      
       if (isLogin) {
-        onLogin(data.user);
+        await signInWithEmailAndPassword(auth, email, password);
       } else {
-        setIsLogin(true);
-        alert('Registration successful! Please login.');
+        const { user } = await createUserWithEmailAndPassword(auth, email, password);
+        await updateProfile(user, { displayName: name });
+        // Create user doc
+        await setDoc(doc(db, 'users', user.uid), {
+          name,
+          email,
+          createdAt: new Date().toISOString()
+        });
       }
     } catch (err: any) {
       setError(err.message);
@@ -258,12 +275,59 @@ export default function App() {
   const [user, setUser] = useState<{name: string, email: string} | null>(null);
   const [activeView, setActiveView] = useState<'dashboard' | 'domain' | 'contacts' | 'analytics'>('dashboard');
   const [activeDomain, setActiveDomain] = useState<DomainInfo | null>(null);
+  const [domainList, setDomainList] = useState<DomainInfo[]>([]);
 
-  // Load persistent data
+  // Auth Listener
   useEffect(() => {
-    fetch('/api/contacts').then(res => res.json()).then(data => setContactList(data));
-    fetch('/api/campaigns').then(res => res.json()).then(data => setCampaignList(data));
+    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+      if (firebaseUser) {
+        setUser({
+          name: firebaseUser.displayName || 'User',
+          email: firebaseUser.email || ''
+        });
+      } else {
+        setUser(null);
+      }
+    });
+    return () => unsubscribe();
   }, []);
+
+  // Use Firestore for persistence
+  useEffect(() => {
+    if (!user) return;
+
+    // Contacts Listener
+    const qContacts = query(collection(db, 'contacts'), where('userId', '==', auth.currentUser?.uid));
+    const unsubContacts = onSnapshot(qContacts, (snapshot) => {
+      setContactList(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (err) => handleFirestoreError(err, OperationType.LIST, 'contacts'));
+
+    // Campaigns Listener
+    const qCampaigns = query(
+      collection(db, 'campaigns'), 
+      where('userId', '==', auth.currentUser?.uid),
+      orderBy('id', 'desc')
+    );
+    const unsubCampaigns = onSnapshot(qCampaigns, (snapshot) => {
+      setCampaignList(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (err) => handleFirestoreError(err, OperationType.LIST, 'campaigns'));
+
+    // Domains Listener
+    const qDomains = query(collection(db, 'domains'), where('userId', '==', auth.currentUser?.uid));
+    const unsubDomains = onSnapshot(qDomains, (snapshot) => {
+      const domains = snapshot.docs.map(doc => doc.data() as DomainInfo);
+      setDomainList(domains);
+      if (domains.length > 0 && !activeDomain) {
+        setActiveDomain(domains[0]);
+      }
+    }, (err) => handleFirestoreError(err, OperationType.LIST, 'domains'));
+
+    return () => {
+      unsubContacts();
+      unsubCampaigns();
+      unsubDomains();
+    };
+  }, [user]);
 
   const [inputDomain, setInputDomain] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
@@ -276,9 +340,9 @@ export default function App() {
   const [campaignList, setCampaignList] = useState<any[]>([]);
   const [sendingLogs, setSendingLogs] = useState<string[]>([]);
 
-  const handleCreateCampaign = (e: React.FormEvent) => {
+  const handleCreateCampaign = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newCampaign.subject) return;
+    if (!newCampaign.subject || !auth.currentUser) return;
     
     const id = Date.now();
     const campaign = {
@@ -287,36 +351,38 @@ export default function App() {
       sentTo: contactList.length,
       status: 'Queued',
       time: 'Just now',
-      delivery: '0%'
+      delivery: '0%',
+      userId: auth.currentUser.uid,
+      createdAt: serverTimestamp()
     };
     
-    const updatedCampaigns = [campaign, ...campaignList];
-    setCampaignList(updatedCampaigns);
     setNewCampaign({ subject: '', content: '' });
     setShowCampaignModal(false);
 
-    // Save to server
-    fetch('/api/campaigns', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(campaign)
-    });
-    
     // Simulate Sending Process
     setSendingLogs(prev => [`[${new Date().toLocaleTimeString()}] Queueing campaign: ${newCampaign.subject}`, ...prev]);
     
-    setTimeout(() => {
-      setCampaignList(prev => prev.map(c => c.id === id ? { ...c, status: 'Sending', delivery: '15%' } : c));
+    // We need the document ID to update it. addDoc returns the docRef.
+    let docRef: any;
+    try {
+      docRef = await addDoc(collection(db, 'campaigns'), campaign);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, 'campaigns');
+      return;
+    }
+
+    setTimeout(async () => {
+      await setDoc(docRef, { status: 'Sending', delivery: '15%' }, { merge: true });
       setSendingLogs(prev => [`[${new Date().toLocaleTimeString()}] Starting delivery to ${contactList.length} contacts`, ...prev]);
     }, 2000);
 
-    setTimeout(() => {
-      setCampaignList(prev => prev.map(c => c.id === id ? { ...c, status: 'Sending', delivery: '65%' } : c));
+    setTimeout(async () => {
+      await setDoc(docRef, { status: 'Sending', delivery: '65%' }, { merge: true });
       setSendingLogs(prev => [`[${new Date().toLocaleTimeString()}] SMTP handshakes successful...`, ...prev]);
     }, 5000);
 
-    setTimeout(() => {
-      setCampaignList(prev => prev.map(c => c.id === id ? { ...c, status: 'Success', delivery: '100%' } : c));
+    setTimeout(async () => {
+      await setDoc(docRef, { status: 'Success', delivery: '100%' }, { merge: true });
       setSendingLogs(prev => [`[${new Date().toLocaleTimeString()}] Campaign completed! All emails processed.`, ...prev]);
     }, 8000);
   };
@@ -324,56 +390,58 @@ export default function App() {
   // Contacts State
   const [contactList, setContactList] = useState<any[]>([]);
 
-  const handleAddManualContact = (e: React.FormEvent) => {
+  const handleAddManualContact = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newContactEmail) return;
+    if (!newContactEmail || !auth.currentUser) return;
     const newC = {
       email: newContactEmail,
       status: 'Active',
       source: 'Manual',
-      added: 'Just now'
+      added: 'Just now',
+      userId: auth.currentUser.uid
     };
-    const updated = [newC, ...contactList];
-    setContactList(updated);
+    
     setNewContactEmail('');
     setShowAddContactModal(false);
 
-    // Persist
-    fetch('/api/contacts', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updated)
-    });
+    // Persist to Firestore
+    try {
+      await addDoc(collection(db, 'contacts'), newC);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, 'contacts');
+    }
   };
 
-  const handleDeleteContact = (email: string) => {
-    const updated = contactList.filter(c => c.email !== email);
-    setContactList(updated);
+  const handleDeleteContact = async (email: string) => {
+    if (!auth.currentUser) return;
     
-    // Persist
-    fetch('/api/contacts', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updated)
-    });
+    // In a real app, you'd use the document ID. Since we have the email, we'll find the doc.
+    try {
+      const q = query(collection(db, 'contacts'), where('email', '==', email), where('userId', '==', auth.currentUser.uid));
+      const snapshot = await getDocs(q);
+      snapshot.forEach(async (docSnap) => {
+        await deleteDoc(doc(db, 'contacts', docSnap.id));
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `contacts/${email}`);
+    }
   };
 
-  const handleImportContacts = () => {
+  const handleImportContacts = async () => {
+    if (!auth.currentUser) return;
     const imports = [
-      { email: `user_${Math.floor(Math.random()*1000)}@import.com`, status: 'Active', source: 'Bulk Import', added: 'Just now' },
-      { email: `lead_${Math.floor(Math.random()*1000)}@crm.com`, status: 'Active', source: 'Bulk Import', added: 'Just now' },
+      { email: `user_${Math.floor(Math.random()*1000)}@import.com`, status: 'Active', source: 'Bulk Import', added: 'Just now', userId: auth.currentUser.uid },
+      { email: `lead_${Math.floor(Math.random()*1000)}@crm.com`, status: 'Active', source: 'Bulk Import', added: 'Just now', userId: auth.currentUser.uid },
     ];
-    const updated = [...imports, ...contactList];
-    setContactList(updated);
     
-    // Persist
-    fetch('/api/contacts', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updated)
-    });
-
-    alert('Imported 2 contacts successfully!');
+    try {
+      for (const contact of imports) {
+        await addDoc(collection(db, 'contacts'), contact);
+      }
+      alert('Imported 2 contacts successfully!');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, 'contacts/bulk');
+    }
   };
 
   // Dynamic dashboard stats
@@ -426,16 +494,29 @@ export default function App() {
       verifyRecord(name, 'DMARC')
     ]);
 
-    setActiveDomain(prev => prev ? ({
-      ...prev,
-      spf: { ...prev.spf, status: spf.status, value: spf.records?.[0]?.join('') },
-      dkim: { ...prev.dkim, status: dkim.status, value: dkim.records?.[0]?.join('') },
-      dmarc: { ...prev.dmarc, status: dmarc.status, value: dmarc.records?.[0]?.join('') }
-    }) : null);
+    const finalDomain = {
+      ...freshDomain,
+      userId: auth.currentUser?.uid,
+      createdAt: new Date().toISOString(),
+      spf: { ...freshDomain.spf, status: spf.status, value: spf.records?.[0]?.join('') },
+      dkim: { ...freshDomain.dkim, status: dkim.status, value: dkim.records?.[0]?.join('') },
+      dmarc: { ...freshDomain.dmarc, status: dmarc.status, value: dmarc.records?.[0]?.join('') }
+    };
+
+    setActiveDomain(finalDomain as any);
+
+    // Persist Domain to Firestore
+    try {
+      if (auth.currentUser) {
+        await setDoc(doc(db, 'domains', name.replace(/\./g, '_')), finalDomain);
+      }
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, 'domains');
+    }
   };
 
   useEffect(() => {
-    handleAddDomain('google.com'); // Default example
+    // Rely on Firestore listener for existing domains
   }, []);
 
   if (!user) {
@@ -506,7 +587,7 @@ export default function App() {
               </div>
             </div>
             <button 
-              onClick={() => setUser(null)}
+              onClick={() => signOut(auth)}
               className="text-slate-400 hover:text-white p-1 hover:bg-slate-700 rounded transition-colors"
             >
               <LogOut size={14} />

@@ -1,0 +1,75 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "email"]
+    },
+    "Domain": {
+      "title": "Domain",
+      "description": "Email domain verification setup",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "userId": { "type": "string" },
+        "spf": { "type": "object" },
+        "dkim": { "type": "object" },
+        "dmarc": { "type": "object" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "userId"]
+    },
+    "Contact": {
+      "title": "Contact",
+      "description": "Email contact",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "status": { "type": "string" },
+        "source": { "type": "string" },
+        "added": { "type": "string" },
+        "userId": { "type": "string" }
+      },
+      "required": ["email", "userId"]
+    },
+    "Campaign": {
+      "title": "Campaign",
+      "description": "Email campaign tracking",
+      "type": "object",
+      "properties": {
+        "subject": { "type": "string" },
+        "sentTo": { "type": "integer" },
+        "status": { "type": "string" },
+        "time": { "type": "string" },
+        "delivery": { "type": "string" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["subject", "userId"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "domains/{domainId}": {
+      "schema": "Domain",
+      "description": "User domains"
+    },
+    "contacts/{contactId}": {
+      "schema": "Contact",
+      "description": "User contacts"
+    },
+    "campaigns/{campaignId}": {
+      "schema": "Campaign",
+      "description": "User campaigns"
+    }
+  }
+}

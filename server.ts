@@ -47,87 +47,15 @@ async function startServer() {
     }
   });
 
-  // --- Persistent Storage Helpers ---
-  const DOMAINS_FILE = path.join(process.cwd(), "domains.json");
-  const CONTACTS_FILE = path.join(process.cwd(), "contacts.json");
-  const CAMPAIGNS_FILE = path.join(process.cwd(), "campaigns.json");
+  // --- Persistent Storage Helpers removed as we use Firebase now ---
 
-  const loadData = (file: string) => {
-    if (fs.existsSync(file)) {
-      try { return JSON.parse(fs.readFileSync(file, "utf-8")); } catch (e) { return []; }
-    }
-    return [];
-  };
-
-  const saveData = (file: string, data: any[]) => {
-    fs.writeFileSync(file, JSON.stringify(data, null, 2));
-  };
-
-  // Domains Endpoints
-  app.get("/api/domains", (req, res) => res.json(loadData(DOMAINS_FILE)));
-  app.post("/api/domains", (req, res) => {
-    const domains = loadData(DOMAINS_FILE);
-    domains.push(req.body);
-    saveData(DOMAINS_FILE, domains);
-    res.json({ success: true });
-  });
-
-  // Contacts Endpoints
-  app.get("/api/contacts", (req, res) => res.json(loadData(CONTACTS_FILE)));
-  app.post("/api/contacts", (req, res) => {
-    saveData(CONTACTS_FILE, req.body); // Expecting full list or handle push
-    res.json({ success: true });
-  });
-
-  // Campaigns Endpoints
-  app.get("/api/campaigns", (req, res) => res.json(loadData(CAMPAIGNS_FILE)));
-  app.post("/api/campaigns", (req, res) => {
-    const campaigns = loadData(CAMPAIGNS_FILE);
-    campaigns.push(req.body);
-    saveData(CAMPAIGNS_FILE, campaigns);
-    res.json({ success: true });
-  });
-
-  // --- Auth Logic ---
-  const USERS_FILE = path.join(process.cwd(), "users.json");
+  // Domains verification (Server-side DNS logic is still needed)
+  app.get("/api/domains", (req, res) => res.json([])); // Legacy placeholder
   
-  // Helper to load users
-  const loadUsers = () => {
-    if (fs.existsSync(USERS_FILE)) {
-      try {
-        return JSON.parse(fs.readFileSync(USERS_FILE, "utf-8"));
-      } catch (e) {
-        return [];
-      }
-    }
-    return [];
-  };
+  // Contacts Endpoints (Removed in favor of Firebase)
+  // Campaigns Endpoints (Removed in favor of Firebase)
 
-  // Helper to save users
-  const saveUsers = (data: any[]) => {
-    fs.writeFileSync(USERS_FILE, JSON.stringify(data, null, 2));
-  };
-
-  app.post("/api/auth/register", async (req, res) => {
-    const { name, email, password } = req.body;
-    const users = loadUsers();
-    if (users.find((u: any) => u.email === email)) {
-      return res.status(400).json({ error: "User already exists" });
-    }
-    users.push({ name, email, password });
-    saveUsers(users);
-    res.json({ success: true, message: "User registered" });
-  });
-
-  app.post("/api/auth/login", (req, res) => {
-    const { email, password } = req.body;
-    const users = loadUsers();
-    const user = users.find((u: any) => u.email === email && u.password === password);
-    if (!user) {
-      return res.status(401).json({ error: "Invalid credentials" });
-    }
-    res.json({ success: true, user: { name: user.name, email: user.email } });
-  });
+  // Auth Logic (Removed in favor of Firebase)
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
