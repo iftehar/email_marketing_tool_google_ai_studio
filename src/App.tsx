@@ -462,16 +462,29 @@ export default function App() {
 
   const verifyRecord = async (domainName: string, type: 'SPF' | 'DKIM' | 'DMARC', selector?: string) => {
     try {
-      const res = await fetch('/api/verify-dns', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ domain: domainName, type, selector: selector || 'google' })
-      });
-      const data = await res.json();
-      return data;
+      let queryName = domainName;
+      if (type === 'DKIM') queryName = `${selector || 'google'}._domainkey.${domainName}`;
+      if (type === 'DMARC') queryName = `_dmarc.${domainName}`;
+
+      const response = await fetch(`https://dns.google/resolve?name=${queryName}&type=TXT`);
+      const data = await response.json();
+      
+      if (data.Answer && data.Answer.length > 0) {
+        const records = data.Answer.map((a: any) => a.data.replace(/"/g, ''));
+        let verified = false;
+        if (type === 'SPF') verified = records.some((r: string) => r.includes('v=spf1'));
+        if (type === 'DKIM') verified = records.some((r: string) => r.includes('v=DKIM1'));
+        if (type === 'DMARC') verified = records.some((r: string) => r.includes('v=DMARC1'));
+        
+        return { 
+          status: verified ? 'Verified' : 'Unverified', 
+          value: records[0] 
+        };
+      }
+      return { status: 'Unverified' };
     } catch (e) {
       console.error(e);
-      return { status: 'missing' };
+      return { status: 'Unverified' };
     }
   };
 
