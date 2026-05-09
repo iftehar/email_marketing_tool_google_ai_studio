@@ -256,8 +256,15 @@ const RecordCard = ({ record, onVerify, stepNumber }: { record: DNSRecord; onVer
 
 export default function App() {
   const [user, setUser] = useState<{name: string, email: string} | null>(null);
-  const [activeView, setActiveView] = useState<'dashboard' | 'domain' | 'contacts' | 'analytics'>('domain');
+  const [activeView, setActiveView] = useState<'dashboard' | 'domain' | 'contacts' | 'analytics'>('dashboard');
   const [activeDomain, setActiveDomain] = useState<DomainInfo | null>(null);
+
+  // Load persistent data
+  useEffect(() => {
+    fetch('/api/contacts').then(res => res.json()).then(data => setContactList(data));
+    fetch('/api/campaigns').then(res => res.json()).then(data => setCampaignList(data));
+  }, []);
+
   const [inputDomain, setInputDomain] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [showAddContactModal, setShowAddContactModal] = useState(false);
@@ -283,9 +290,17 @@ export default function App() {
       delivery: '0%'
     };
     
-    setCampaignList([campaign, ...campaignList]);
+    const updatedCampaigns = [campaign, ...campaignList];
+    setCampaignList(updatedCampaigns);
     setNewCampaign({ subject: '', content: '' });
     setShowCampaignModal(false);
+
+    // Save to server
+    fetch('/api/campaigns', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(campaign)
+    });
     
     // Simulate Sending Process
     setSendingLogs(prev => [`[${new Date().toLocaleTimeString()}] Queueing campaign: ${newCampaign.subject}`, ...prev]);
@@ -318,13 +333,29 @@ export default function App() {
       source: 'Manual',
       added: 'Just now'
     };
-    setContactList([newC, ...contactList]);
+    const updated = [newC, ...contactList];
+    setContactList(updated);
     setNewContactEmail('');
     setShowAddContactModal(false);
+
+    // Persist
+    fetch('/api/contacts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updated)
+    });
   };
 
   const handleDeleteContact = (email: string) => {
-    setContactList(contactList.filter(c => c.email !== email));
+    const updated = contactList.filter(c => c.email !== email);
+    setContactList(updated);
+    
+    // Persist
+    fetch('/api/contacts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updated)
+    });
   };
 
   const handleImportContacts = () => {
@@ -332,7 +363,16 @@ export default function App() {
       { email: `user_${Math.floor(Math.random()*1000)}@import.com`, status: 'Active', source: 'Bulk Import', added: 'Just now' },
       { email: `lead_${Math.floor(Math.random()*1000)}@crm.com`, status: 'Active', source: 'Bulk Import', added: 'Just now' },
     ];
-    setContactList([...imports, ...contactList]);
+    const updated = [...imports, ...contactList];
+    setContactList(updated);
+    
+    // Persist
+    fetch('/api/contacts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updated)
+    });
+
     alert('Imported 2 contacts successfully!');
   };
 
