@@ -1,0 +1,6 @@
+{
+  "name": "SendFlow - Domain Email Marketing",
+  "description": "A professional email marketing tool focused on domain management, SPF, DKIM, and DMARC setup for reliable delivery.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
