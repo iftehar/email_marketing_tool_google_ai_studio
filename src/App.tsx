@@ -51,15 +51,50 @@ import {
 
 const AuthView = () => {
   const [isLogin, setIsLogin] = useState(true);
+  const [step, setStep] = useState<'form' | 'otp'>('form');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [generatedAuthOTP, setGeneratedAuthOTP] = useState('');
+  const [enteredAuthOTP, setEnteredAuthOTP] = useState('');
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const sendOTP = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      const code = Math.floor(100000 + Math.random() * 900000).toString();
+      
+      const response = await fetch('/api/send-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, otp: code, type: 'auth' })
+      });
+      
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Failed to send OTP');
+
+      setGeneratedAuthOTP(code);
+      setStep('otp');
+      if (data.simulated) {
+        console.log(`[SIMULATED] Signup OTP for ${email}: ${code}`);
+      }
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleFinalSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (step === 'otp' && enteredAuthOTP !== generatedAuthOTP) {
+      setError('Invalid verification code.');
+      return;
+    }
+
     setError('');
     setLoading(true);
 
@@ -73,13 +108,24 @@ const AuthView = () => {
         await setDoc(doc(db, 'users', user.uid), {
           name,
           email,
-          createdAt: new Date().toISOString()
+          createdAt: new Date().toISOString(),
+          isPermanent: true
         });
       }
     } catch (err: any) {
       setError(err.message);
+      if (!isLogin) setStep('form');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isLogin && step === 'form') {
+      sendOTP();
+    } else {
+      handleFinalSubmit(e);
     }
   };
 
@@ -101,79 +147,101 @@ const AuthView = () => {
             <Mail className="text-white" size={28} />
           </div>
           <h1 className="text-3xl font-black text-slate-900">SendFlow</h1>
-          <p className="text-slate-500 font-medium mt-1">
-            {isLogin ? 'Welcome back to professional mailing' : 'Start your domain marketing journey'}
+          <p className="text-slate-500 font-medium mt-1 text-center">
+            {step === 'otp' 
+              ? `Check your inbox! We sent a code to ${email}`
+              : isLogin ? 'Welcome back to professional mailing' : 'Start your domain marketing journey'
+            }
           </p>
         </div>
 
-        <div className="flex bg-slate-100 p-1 rounded-xl mb-8">
-          <button 
-            onClick={() => setIsLogin(true)}
-            className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${isLogin ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-          >
-            Login
-          </button>
-          <button 
-            onClick={() => setIsLogin(false)}
-            className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${!isLogin ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-          >
-            Register
-          </button>
-        </div>
+        {step === 'form' && (
+          <div className="flex bg-slate-100 p-1 rounded-xl mb-8">
+            <button 
+              onClick={() => setIsLogin(true)}
+              className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${isLogin ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+            >
+              Login
+            </button>
+            <button 
+              onClick={() => setIsLogin(false)}
+              className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${!isLogin ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+            >
+              Register
+            </button>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {!isLogin && (
-            <div>
-              <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 ml-1">Full Name</label>
-              <div className="relative">
-                <User className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                <input 
-                  type="text" 
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
-                  placeholder="John Doe"
-                  required
-                />
+          {step === 'form' ? (
+            <>
+              {!isLogin && (
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 ml-1">Full Name</label>
+                  <div className="relative">
+                    <User className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                    <input 
+                      type="text" 
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all font-medium"
+                      placeholder="John Doe"
+                      required
+                    />
+                  </div>
+                </div>
+              )}
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 ml-1">Email Address</label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                  <input 
+                    type="email" 
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all font-medium"
+                    placeholder="you@company.com"
+                    required
+                  />
+                </div>
               </div>
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 ml-1">Password</label>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                  <input 
+                    type={showPassword ? "text" : "password"} 
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full pl-10 pr-12 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all font-medium"
+                    placeholder="••••••••"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                    tabIndex={-1}
+                  >
+                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="py-2">
+              <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-4 text-center">Enter the 6-digit verification code</label>
+              <input 
+                type="text" 
+                maxLength={6}
+                value={enteredAuthOTP}
+                onChange={(e) => setEnteredAuthOTP(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                className="w-full py-4 text-center text-3xl font-black tracking-[0.5em] bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+                placeholder="000000"
+                required
+              />
             </div>
           )}
-          <div>
-            <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 ml-1">Email Address</label>
-            <div className="relative">
-              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-              <input 
-                type="email" 
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
-                placeholder="you@company.com"
-                required
-              />
-            </div>
-          </div>
-          <div>
-            <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 ml-1">Password</label>
-            <div className="relative">
-              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-              <input 
-                type={showPassword ? "text" : "password"} 
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full pl-10 pr-12 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
-                placeholder="••••••••"
-                required
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
-                tabIndex={-1}
-              >
-                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-              </button>
-            </div>
-          </div>
 
           {error && (
             <div className="bg-rose-50 text-rose-600 px-4 py-3 rounded-xl text-xs font-bold border border-rose-100 flex items-center gap-2">
@@ -188,23 +256,35 @@ const AuthView = () => {
           >
             {loading ? <RefreshCcw size={20} className="animate-spin" /> : (
               <>
-                {isLogin ? 'Sign In' : 'Create Account'} <ArrowRight size={20} />
+                {step === 'otp' ? 'Verify & Finish' : isLogin ? 'Sign In' : 'Continue'} <ArrowRight size={20} />
               </>
             )}
           </button>
+          
+          {step === 'otp' && (
+            <button 
+              type="button"
+              onClick={() => setStep('form')}
+              className="w-full py-2 text-slate-500 text-sm font-bold hover:text-slate-700 transition-colors"
+            >
+              Back to registration
+            </button>
+          )}
         </form>
 
-        <div className="mt-8 pt-8 border-t border-slate-100 text-center">
-          <p className="text-sm text-slate-500 font-medium">
-            {isLogin ? "Don't have an account?" : "Already have an account?"}
-            <button 
-              onClick={() => setIsLogin(!isLogin)}
-              className="ml-2 text-indigo-600 font-bold hover:underline"
-            >
-              {isLogin ? 'Sign Up' : 'Sign In'}
-            </button>
-          </p>
-        </div>
+        {step === 'form' && (
+          <div className="mt-8 pt-8 border-t border-slate-100 text-center">
+            <p className="text-sm text-slate-500 font-medium">
+              {isLogin ? "Don't have an account?" : "Already have an account?"}
+              <button 
+                onClick={() => setIsLogin(!isLogin)}
+                className="ml-2 text-indigo-600 font-bold hover:underline"
+              >
+                {isLogin ? 'Sign Up' : 'Sign In'}
+              </button>
+            </p>
+          </div>
+        )}
       </motion.div>
     </div>
   );
@@ -331,6 +411,12 @@ export default function App() {
 
   const [inputDomain, setInputDomain] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [otpStep, setOtpStep] = useState<'domain' | 'otp'>('domain');
+  const [pendingDomain, setPendingDomain] = useState('');
+  const [generatedOTP, setGeneratedOTP] = useState('');
+  const [enteredOTP, setEnteredOTP] = useState('');
+  const [isVerifyingOTP, setIsVerifyingOTP] = useState(false);
+  const [otpError, setOtpError] = useState('');
   const [showAddContactModal, setShowAddContactModal] = useState(false);
   const [showCampaignModal, setShowCampaignModal] = useState(false);
   const [newCampaign, setNewCampaign] = useState({ subject: '', content: '' });
@@ -488,6 +574,57 @@ export default function App() {
     }
   };
 
+  const handleStartDomainAdd = async () => {
+    if (!inputDomain || !auth.currentUser?.email) return;
+    setPendingDomain(inputDomain);
+    setIsVerifyingOTP(true);
+    try {
+      const code = Math.floor(100000 + Math.random() * 900000).toString();
+      
+      const response = await fetch('/api/send-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          email: auth.currentUser.email, 
+          otp: code, 
+          type: 'domain',
+          domainName: inputDomain 
+        })
+      });
+      
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Failed to send verification code');
+
+      setGeneratedOTP(code);
+      setOtpStep('otp');
+      if (data.simulated) {
+        console.log(`[SIMULATED] OTP for ${inputDomain}: ${code}`);
+      }
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setIsVerifyingOTP(false);
+    }
+  };
+
+  const handleVerifyOTP = async () => {
+    setIsVerifyingOTP(true);
+    setOtpError('');
+    
+    // Simulate network delay
+    await new Promise(r => setTimeout(r, 1000));
+
+    if (enteredOTP === generatedOTP) {
+      await handleAddDomain(pendingDomain);
+      setOtpStep('domain');
+      setEnteredOTP('');
+      setShowAddModal(false);
+    } else {
+      setOtpError('Invalid OTP. Please check and try again.');
+    }
+    setIsVerifyingOTP(false);
+  };
+
   const handleAddDomain = async (name: string) => {
     if (!name) return;
     const freshDomain: DomainInfo = {
@@ -498,7 +635,6 @@ export default function App() {
     };
     setActiveDomain(freshDomain);
     setInputDomain('');
-    setShowAddModal(false);
     
     // Auto verify
     const [spf, dkim, dmarc] = await Promise.all([
@@ -511,9 +647,9 @@ export default function App() {
       ...freshDomain,
       userId: auth.currentUser?.uid,
       createdAt: new Date().toISOString(),
-      spf: { ...freshDomain.spf, status: spf.status, value: spf.records?.[0]?.join('') },
-      dkim: { ...freshDomain.dkim, status: dkim.status, value: dkim.records?.[0]?.join('') },
-      dmarc: { ...freshDomain.dmarc, status: dmarc.status, value: dmarc.records?.[0]?.join('') }
+      spf: { ...freshDomain.spf, status: spf.status, value: spf.status === 'Verified' ? spf.value : '' },
+      dkim: { ...freshDomain.dkim, status: dkim.status, value: dkim.status === 'Verified' ? dkim.value : '' },
+      dmarc: { ...freshDomain.dmarc, status: dmarc.status, value: dmarc.status === 'Verified' ? dmarc.value : '' }
     };
 
     setActiveDomain(finalDomain as any);
@@ -596,7 +732,10 @@ export default function App() {
               </div>
               <div className="overflow-hidden">
                 <p className="text-[10px] font-bold text-white truncate">{user.name}</p>
-                <p className="text-[8px] text-slate-400 truncate">{user.email}</p>
+                <div className="flex items-center gap-1">
+                  <p className="text-[8px] text-slate-400 truncate">{user.email}</p>
+                  <Lock size={8} className="text-slate-500" />
+                </div>
               </div>
             </div>
             <button 
@@ -915,46 +1054,90 @@ export default function App() {
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
               className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md relative z-10 border border-slate-200"
             >
-              <h2 className="text-2xl font-bold text-slate-900 mb-2">Add New Domain</h2>
-              <p className="text-slate-500 mb-6 font-medium">Verify your domain to start sending professional emails.</p>
+              <h2 className="text-2xl font-bold text-slate-900 mb-2">
+                {otpStep === 'domain' ? 'Add New Domain' : 'Verify Ownership'}
+              </h2>
+              <p className="text-slate-500 mb-6 font-medium">
+                {otpStep === 'domain' 
+                  ? 'Verify your domain to start sending professional emails.' 
+                  : `Enter the code sent to ${user?.email}`
+                }
+              </p>
               
               <div className="space-y-4">
-                <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Domain Name</label>
-                  <input 
-                    autoFocus
-                    type="text" 
-                    placeholder="marketing.yourdomain.com"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
-                    value={inputDomain}
-                    onChange={(e) => setInputDomain(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleAddDomain(inputDomain)}
-                  />
-                </div>
-                
-                <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
-                  <div className="flex gap-3">
-                    <ShieldCheck className="text-indigo-500 shrink-0" size={20} />
-                    <p className="text-xs text-slate-600 leading-relaxed">
-                      We will generate SPF, DKIM, and DMARC records for you to add to your DNS provider.
-                    </p>
-                  </div>
-                </div>
+                {otpStep === 'domain' ? (
+                  <>
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Domain Name</label>
+                      <input 
+                        autoFocus
+                        type="text" 
+                        placeholder="marketing.yourdomain.com"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+                        value={inputDomain}
+                        onChange={(e) => setInputDomain(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleStartDomainAdd()}
+                      />
+                    </div>
+                    
+                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                      <div className="flex gap-3">
+                        <ShieldCheck className="text-indigo-500 shrink-0" size={20} />
+                        <p className="text-xs text-slate-600 leading-relaxed">
+                          We will send a verification code to your domain administrator to confirm ownership.
+                        </p>
+                      </div>
+                    </div>
 
-                <div className="flex gap-3 pt-2">
-                  <button 
-                    onClick={() => setShowAddModal(false)}
-                    className="flex-1 px-4 py-3 bg-slate-100 text-slate-700 rounded-xl text-sm font-bold hover:bg-slate-200 transition-all"
-                  >
-                    Cancel
-                  </button>
-                  <button 
-                    onClick={() => handleAddDomain(inputDomain)}
-                    className="flex-1 px-4 py-3 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-600/20 transition-all"
-                  >
-                    Add Domain
-                  </button>
-                </div>
+                    <div className="flex gap-3 pt-2">
+                      <button 
+                        onClick={() => setShowAddModal(false)}
+                        className="flex-1 px-4 py-3 bg-slate-100 text-slate-700 rounded-xl text-sm font-bold hover:bg-slate-200 transition-all"
+                      >
+                        Cancel
+                      </button>
+                      <button 
+                        onClick={handleStartDomainAdd}
+                        className="flex-1 px-4 py-3 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-600/20 transition-all"
+                      >
+                        Verify Domain
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Verification Code</label>
+                      <input 
+                        autoFocus
+                        type="text" 
+                        maxLength={6}
+                        placeholder="000000"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 text-center text-2xl tracking-[1em] font-black outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+                        value={enteredOTP}
+                        onChange={(e) => setEnteredOTP(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                        onKeyDown={(e) => e.key === 'Enter' && handleVerifyOTP()}
+                      />
+                      {otpError && <p className="text-rose-500 text-[10px] font-bold mt-2 text-center uppercase tracking-wider">{otpError}</p>}
+                    </div>
+
+                    <div className="flex gap-3 pt-2">
+                      <button 
+                        onClick={() => setOtpStep('domain')}
+                        className="flex-1 px-4 py-3 bg-slate-100 text-slate-700 rounded-xl text-sm font-bold hover:bg-slate-200 transition-all"
+                      >
+                        Back
+                      </button>
+                      <button 
+                        onClick={handleVerifyOTP}
+                        disabled={isVerifyingOTP || enteredOTP.length !== 6}
+                        className="flex-1 px-4 py-3 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-600/20 transition-all disabled:opacity-50"
+                      >
+                        {isVerifyingOTP ? 'Verifying...' : 'Submit Code'}
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
             </motion.div>
           </div>
